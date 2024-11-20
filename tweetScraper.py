@@ -25,6 +25,10 @@ def random_sleep(min_time=0.5, max_time=1.5):
     time.sleep(random.uniform(min_time, max_time))
 
 
+def random_time_offset(base_time, offset=0.5):
+    return random.uniform(base_time - offset, base_time + offset)
+
+
 class TweetScraper:
     def __init__(self, resolume_ip, osc_port=7070, http_port=8080, banned_words_file="banned_words.txt", twitter_tag="#warwickpop", layer_number=1, NUM_TWEETS=10, headless=True, refresh_period=300):
         if twitter_tag.startswith("#"):
@@ -210,80 +214,89 @@ class TweetScraper:
     
 
 
-
     def scrape_and_process(self):
-        print("Scraping...")
+        print("Starting continuous tweet scraping...")
+        print(f"Refresh period set to {self.refresh_period} seconds.")
         try:
             # First login
             if not self.login():
                 print("Failed to login. Exiting...")
                 return
             
-            
-            # Navigate to the twitter search page with the given tag.
+            # Navigate to the twitter search page with the given tag
             search_url = f"https://twitter.com/search?q=%23{self.twitter_tag}&src=typed_query&f=live"
             print(f"Navigating to: {search_url}")
             self.driver.get(search_url)
             print("Loaded search page.")
 
-            # Add a longer wait time for the page to fully load
-            time.sleep(5)
-            random_sleep()
+            # Continuous scraping loop
+            while True:
+                print("Press Ctrl+C to stop the script.")
+                try:    
+                    # Clear the directory of images
+                    self.clear_directory(self.screenshot_dir, filetypes=[".png"])
 
-            # Wait for the tweets to load
-            print("Waiting for tweets to load...")
-            try:
-                wait = WebDriverWait(self.driver, 15)  # Increased timeout to 15 seconds
-                tweets = wait.until(
-                    EC.presence_of_all_elements_located(
-                        (By.CSS_SELECTOR, 'article[data-testid="tweet"]')
+                    # Wait for the tweets to load
+                    print("Waiting for tweets to load...")
+                    wait = WebDriverWait(self.driver, 15)  # Increased timeout to 15 seconds
+                    tweets = wait.until(
+                        EC.presence_of_all_elements_located(
+                            (By.CSS_SELECTOR, 'article[data-testid="tweet"]')
+                        )
                     )
-                )
-                print(f"Found {len(tweets)} tweets.")
-            except Exception as e:
-                print(f"Error finding tweets: {e}")
-                # Let's try to get the page source to see what we're dealing with
-                print("Page source snippet:")
-                print(self.driver.page_source[:1000])
-                return
+                    print(f"Found {len(tweets)} tweets.")
 
+                    # Get a list of all the tweets, they all have 'data-testid="tweet"' attribute.
+                    clip_number = 1
+                    for idx, tweet in enumerate(tweets[:self.NUM_TWEETS]):
+                        i = idx + 1
+                        # Get tweet text
+                        print(f"\nProcessing tweet {i}")
+                        tweet_text = tweet.find_element(By.CSS_SELECTOR, "div[lang]").text
+                        print(f"Tweet {i} text: {tweet_text[:50]}...")
 
-            # Get a list of all the tweets, they all have 'data-testid="tweet"' attribute.
-            clip_number = 1
-            for idx, tweet in enumerate(tweets[:self.NUM_TWEETS]):
-                i=idx+1
-                # Get tweet text
-                print(f"\nProcessing tweet {i}")
-                tweet_text = tweet.find_element(By.CSS_SELECTOR, "div[lang]").text
-                print(f"Tweet {i} text: {tweet_text[:50]}...")
+                        # Check if tweet is safe
+                        if not self.is_tweet_safe(tweet_text):
+                            print(f"[!] Tweet {i} contains banned words. Skipping...")
+                            continue
 
-                # Check if tweet is safe
-                if not self.is_tweet_safe(tweet_text):
-                    print(f"[!] Tweet {i} contains banned words. Skipping...")
-                    continue
+                        # Capture tweet
+                        print(f"Tweet {i} is safe. Capturing...")
+                        screenshot_path = self.capture_tweet(tweet, i)
+                        print(f"Captured tweet {i} to {screenshot_path}")
 
-                # Capture tweet
-                print(f"Tweet {i} is safe. Capturing...")
-                screenshot_path = self.capture_tweet(tweet, i)
-                print(f"Captured tweet {i} to {screenshot_path}")
+                        # Send to Resolume
+                        print(f"Sending tweet {i} to Resolume...")
+                        self.send_to_resolume(screenshot_path, self.layer_number, clip_number)
+                        clip_number += 1
+                        print(f"Sent tweet {i} to Resolume.")
 
-                # Send to Resolume
-                print(f"Sending tweet {i} to Resolume...")
-                self.send_to_resolume(screenshot_path, self.layer_number, clip_number)
-                clip_number += 1
-                print(f"Sent tweet {i} to Resolume.")
+                        random_sleep()
 
-                random_sleep()
+                    # Wait for the specified refresh period before next scrape
+                    print(f"Waiting {self.refresh_period} seconds before next refresh...")
+                    sleep_period = random_time_offset(self.refresh_period, offset=0.1 * self.refresh_period)
+                    time.sleep(sleep_period)
 
+                    # Refresh the page
+                    print("Refreshing page...")
+                    self.driver.refresh()
+                    time.sleep(10)  # Give some time for the page to reload
 
-            print("Finished processing")
+                except Exception as inner_e:
+                    print(f"Error in scraping loop: {inner_e}")
+                    print(f"\nWaiting and retrying...")
+                    # Wait a bit before trying again
+                    time.sleep(10)
+                    # Refresh the page to reset
+                    self.driver.refresh()
+                    time.sleep(10)
 
         except Exception as e:
-            print("Error occured in scrape_and_process.")
+            print("Critical error in scrape_and_process.")
             print(e)
         finally:
             self.driver.quit()
-
 
 
 if __name__ == "__main__":
@@ -295,9 +308,9 @@ if __name__ == "__main__":
     twitter_tag="#warwickpop" # Tag to search for
     layer_number=1 # Layer number in Resolume
     NUM_TWEETS=10 # Number of tweets to scrape
-    headless = True # Run in headless mode, set to False to see the browser window
+    headless = False # Run in headless mode, set to False to see the browser window
 
-    refresh_period = 300 # Refresh period in seconds
+    refresh_period = 60 # Refresh period in seconds
 
     tweet_scraper = TweetScraper(resolume_ip=ip, osc_port=osc_port, http_port=http_port, banned_words_file=banned_words_file, twitter_tag=twitter_tag, layer_number=layer_number, NUM_TWEETS=NUM_TWEETS, headless=headless, refresh_period=refresh_period)
     tweet_scraper.scrape_and_process()
@@ -305,6 +318,5 @@ if __name__ == "__main__":
 
 
 # Potential Improvements:
-# [] Add functionality to refresh the page and get new tweets every refresh period
 # [] Add logging
 # [] Add more error handling
