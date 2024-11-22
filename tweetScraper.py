@@ -310,7 +310,7 @@ if __name__ == "__main__":
     NUM_TWEETS=10 # Number of tweets to scrape
     headless = False # Run in headless mode, set to False to see the browser window
 
-    refresh_period = 60 # Refresh period in seconds
+    refresh_period = 120 # Refresh period in seconds
 
     tweet_scraper = TweetScraper(resolume_ip=ip, osc_port=osc_port, http_port=http_port, banned_words_file=banned_words_file, twitter_tag=twitter_tag, layer_number=layer_number, NUM_TWEETS=NUM_TWEETS, headless=headless, refresh_period=refresh_period)
     tweet_scraper.scrape_and_process()
